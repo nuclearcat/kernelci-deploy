@@ -210,6 +210,7 @@ cmd_docker() {
     # only x86 is useful for KUnit (for now)
     ./kci_docker $args gcc-10 --arch x86 --fragment=kunit --fragment=kernelci
     ./kci_docker $args rustc-1.62 --fragment=kselftest --fragment=kernelci
+    ./kci_docker $args rustc-1.66 --fragment=kselftest --fragment=kernelci
 
     # rootfs
     ./kci_docker $args buildroot
