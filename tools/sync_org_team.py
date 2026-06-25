@@ -46,6 +46,7 @@ import urllib.request
 API_BASE = "https://api.github.com"
 API_VERSION = "2022-11-28"
 USER_AGENT = "kernelci-org-team-sync"
+REQUEST_TIMEOUT = 30
 
 # GitHub username: 1-39 chars, alphanumeric or single (non-leading/trailing)
 # hyphens. Used to reject malformed input before any destructive action.
@@ -94,7 +95,7 @@ def request(method, url, body=None, accept="application/vnd.github+json"):
     for attempt in range(MAX_RETRIES):
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
                 raw = resp.read().decode("utf-8") if resp.length != 0 else ""
                 return resp.status, _parse(raw, accept), dict(resp.headers)
         except urllib.error.HTTPError as exc:
@@ -148,8 +149,9 @@ def get_paginated(path):
         status, data, headers = request("GET", url)
         if status != 200:
             die(f"GET {url} returned {status}: {data}")
-        if isinstance(data, list):
-            results.extend(data)
+        if not isinstance(data, list):
+            die(f"GET {url} returned non-list response: {data}")
+        results.extend(data)
         url = _next_link(headers.get("Link"))
     return results
 
@@ -214,8 +216,10 @@ def get_pending_invitations(org, team):
 def get_authenticated_login():
     status, data, _ = request("GET", "/user")
     if status == 200 and isinstance(data, dict):
-        return (data.get("login") or "").lower()
-    return ""
+        login = (data.get("login") or "").lower()
+        if login:
+            return login
+    die(f"could not determine authenticated GitHub user (status {status}: {data})")
 
 
 def add_or_invite(org, team, user):
