@@ -50,6 +50,19 @@
   notify: Reload nginx
   tags: nginx
 
+- name: Install the artifact cache policy
+  # Kept out of kernelci-maps.conf on purpose: that file is skipped on hosts
+  # that still carry the gate maps inline in nginx.conf, which is exactly the
+  # case on production, so the cache map would never land there.
+  ansible.builtin.template:
+    src: kernelci-cache.conf.j2
+    dest: /etc/nginx/conf.d/kernelci-cache.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload nginx
+  tags: nginx
+
 - name: Install the rate limiting zones
   ansible.builtin.template:
     src: kernelci-limits.conf.j2

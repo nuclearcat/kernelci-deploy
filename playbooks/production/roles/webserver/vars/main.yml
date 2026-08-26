@@ -5,6 +5,8 @@
 #   root_path       serve files from this directory (static vhost)
 #   fancyindex      enable libnginx-mod-http-fancyindex autoindex
 #   cookie_gate     require the JS/cookie challenge before serving content
+#   immutable_cache emit Cache-Control for date-versioned artifacts, driven by
+#                   the $storage_cache_control map in conf.d/kernelci-cache.conf
 #   decommissioned  serve HTTP 410 with this message instead of content
 #   port            reverse proxy to http://127.0.0.1:<port>
 #   max_body_size   client_max_body_size for upload-heavy proxies
@@ -31,6 +33,7 @@ vhosts:
     root_path: /data/storage.kernelci.org
     fancyindex: true
     cookie_gate: true
+    immutable_cache: true
 
   - vhost_name: storage.chromeos.kernelci.org
     # Content was retired in 2025-06, the directory is kept for archival only.

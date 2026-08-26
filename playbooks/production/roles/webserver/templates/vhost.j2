@@ -98,6 +98,14 @@ server {
             return 302 /__storage_cookie_check?return=$request_uri;
         }
 {% endif %}
+{% if item.immutable_cache | default(false) %}
+        # Cache policy for immutable artifacts, from $storage_cache_control in
+        # conf.d/kernelci-cache.conf. nginx omits the header entirely when the
+        # map yields an empty string, so directory listings are unaffected.
+        # Deliberately without `always`: error responses must not be cached, or
+        # a 404 for a not-yet-uploaded artifact would be pinned for a year.
+        add_header Cache-Control $storage_cache_control;
+{% endif %}
         try_files $uri $uri/ =404;
 {% if item.fancyindex | default(false) %}
         fancyindex on;

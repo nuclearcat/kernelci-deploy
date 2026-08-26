@@ -1,0 +1,32 @@
+# Managed by ansible (kernelci-deploy playbooks/production) - do not edit by hand
+#
+# Cache policy for the storage vhosts.
+#
+# Almost every byte this server sends is an immutable, content-addressed
+# artifact that gets fetched over and over by CI: one 128 MB rootfs image was
+# pulled 17,178 times in a fortnight by a single lab. The files carry ETag and
+# Last-Modified and the server answers conditional requests correctly, but
+# without an explicit Cache-Control nothing downstream caches them - HTTP caches
+# fall back to heuristics and CI clients (wget, python-requests) do not cache at
+# all. This map supplies that policy.
+#
+# $uri is the decoded path without the query string.
+# Regexes are tried in the order they appear, so keep the specific ones first.
+# A vhost opts in with `immutable_cache: true` in the webserver role vars.
+map $uri $storage_cache_control {
+    default "";
+
+    # /images/rootfs/<distro>/<YYYYMMDD>.<n>/... - the date in the path is the
+    # version, so a given URL never changes content. Safe to pin for a year.
+    "~^/images/rootfs/.+/[0-9]{8}\.[0-9]+/"   "public, max-age=31536000, immutable";
+
+    # /kbuild-<toolchain>-<arch>-<build id>/... - addressed by build id, so the
+    # same reasoning applies.
+    "~^/kbuild-[A-Za-z0-9._-]+/"              "public, max-age=31536000, immutable";
+
+    # Rolling tarballs at the root (linux-firmware.tar.gz, linux-next-*.tar.gz)
+    # keep their name while the content changes, so they must not be pinned.
+    # A short lifetime plus revalidation still collapses repeat fetches into
+    # cheap 304s - linux-firmware.tar.gz alone is 1.6 GB fetched 265x/fortnight.
+    "~^/[^/]+\.tar\.(gz|xz)$"                 "public, max-age=600, must-revalidate";
+}
