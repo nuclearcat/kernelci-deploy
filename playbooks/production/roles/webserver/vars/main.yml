@@ -11,6 +11,9 @@
 #   port            reverse proxy to http://127.0.0.1:<port>
 #   max_body_size   client_max_body_size for upload-heavy proxies
 #   proxy_timeout   client_body/proxy_read timeout for slow proxies
+#   proxy_upstream  named nginx upstream instead of 127.0.0.1:<port>
+#   proxy_keepalive use HTTP/1.1 pooled connections to the named upstream
+#   access_log_format  optional nginx log format appended to access_log
 #   streaming       disable proxy buffering (SSE / streamable HTTP)
 #   proxy_host_header  Host header to send upstream, when the backend
 #                   validates it (default: the public $host)
@@ -48,6 +51,9 @@ vhosts:
     port: 3000
     max_body_size: 10000M
     proxy_timeout: 600s
+    proxy_upstream: kernelci_storage
+    proxy_keepalive: true
+    access_log_format: kci_timing
 
   - vhost_name: mcp.kernelci.org
     # Final home of the public read-only KernelCI MCP server, see the mcp role.

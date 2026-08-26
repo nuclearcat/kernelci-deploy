@@ -63,6 +63,16 @@
   notify: Reload nginx
   tags: nginx
 
+- name: Install the storage upstream and timing policy
+  ansible.builtin.template:
+    src: kernelci-timing.conf.j2
+    dest: /etc/nginx/conf.d/kernelci-timing.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload nginx
+  tags: nginx
+
 - name: Install the rate limiting zones
   ansible.builtin.template:
     src: kernelci-limits.conf.j2

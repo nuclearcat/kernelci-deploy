@@ -1,0 +1,23 @@
+# Managed by ansible (kernelci-deploy playbooks/production) - do not edit by hand
+#
+# Access log with timing breakdown. The combined format carries no timing, so a
+# latency spike could not be attributed to nginx, to the connect to the backend,
+# or to the app itself. These four fields separate them:
+#   rt  = total request time nginx saw
+#   uct = time to establish the upstream connection
+#   uht = time until the upstream response headers arrived
+#   urt = total upstream response time
+log_format kci_timing '$remote_addr - $remote_user [$time_local] '
+                      '"$request" $status $body_bytes_sent '
+                      '"$http_referer" "$http_user_agent" '
+                      'rt=$request_time uct=$upstream_connect_time '
+                      'uht=$upstream_header_time urt=$upstream_response_time';
+
+# Keepalive pool to the storage backend. Without an upstream block nginx speaks
+# HTTP/1.0 with Connection: close, opening a fresh TCP connection to :3000 for
+# every request. keepalive keeps idle connections open for reuse.
+upstream kernelci_storage {
+    server 127.0.0.1:3000;
+    keepalive 64;
+    keepalive_timeout 60s;
+}
