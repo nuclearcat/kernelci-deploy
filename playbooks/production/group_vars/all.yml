@@ -52,4 +52,6 @@ mcp_rate_limit_burst: 20
 # what stops one client from pinning the single backend process.
 mcp_conn_limit: 8
 mcp_limit_status: 429
+# Minimum client backoff advertised on nginx-generated throttling responses.
+mcp_retry_after: 1
 mcp_stream_timeout: 3600s
