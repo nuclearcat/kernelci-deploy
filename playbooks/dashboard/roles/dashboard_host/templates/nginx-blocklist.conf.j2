@@ -1,0 +1,5 @@
+# Managed by Ansible.  The included data file is maintained separately.
+geo $dashboard_blocklisted {
+    default 0;
+    include {{ dashboard_nginx_blocklist_path }};
+}

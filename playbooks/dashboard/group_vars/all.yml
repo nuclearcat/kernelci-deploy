@@ -1,0 +1,13 @@
+---
+# GitHub Actions connects as this user and owns the application deployments in
+# ~/dashboard-staging and ~/dashboard-production.
+dashboard_deployment_user: azureuser
+
+# One certificate lineage covers all public Dashboard names.  Certificate
+# issuance is opt-in so a first run is safe before DNS points at a new host.
+dashboard_certificate_name: staging.dashboard.kernelci.org
+dashboard_certificate_domains:
+  - staging.dashboard.kernelci.org
+  - dashboard.kernelci.org
+  - d.kernelci.org
+dashboard_request_certificate: false

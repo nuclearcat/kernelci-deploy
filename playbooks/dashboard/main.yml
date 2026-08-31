@@ -1,0 +1,8 @@
+---
+- name: Configure the KernelCI Dashboard host
+  hosts: dashboard_hosts
+  gather_facts: true
+  become: true
+
+  roles:
+    - dashboard_host

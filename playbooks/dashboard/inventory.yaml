@@ -1,0 +1,9 @@
+all:
+  children:
+    dashboard_hosts:
+      hosts:
+        # This intentionally uses the same alias as `ssh dashboard`.  Override
+        # ansible_host locally if that SSH alias is not configured.
+        dashboard:
+          ansible_user: azureuser
+          ansible_become: true

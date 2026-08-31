@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew Let's Encrypt certificates
+Documentation=https://certbot.eff.org/docs/using.html
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ dashboard_certbot_command }} renew --quiet --no-random-sleep-on-renew
+TimeoutStartSec=600

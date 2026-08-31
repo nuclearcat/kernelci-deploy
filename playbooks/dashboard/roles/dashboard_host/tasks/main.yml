@@ -1,0 +1,412 @@
+---
+- name: Validate the target platform
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == "Debian"
+      - ansible_architecture in dashboard_docker_architectures
+      - ansible_architecture == "x86_64"
+    fail_msg: >-
+      This host-specific role supports Debian-family x86_64 systems only.
+
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Install base host packages
+  ansible.builtin.apt:
+    name: "{{ dashboard_base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Remove Docker packages that conflict with Docker CE on a new install
+  ansible.builtin.apt:
+    name: "{{ dashboard_docker_conflicting_packages }}"
+    state: absent
+  when: "'docker-ce' not in ansible_facts.packages"
+
+- name: Create the APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the Docker APT signing key
+  ansible.builtin.get_url:
+    url: "{{ dashboard_docker_apt_key_url }}"
+    dest: "{{ dashboard_docker_apt_key_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the Docker CE repository
+  ansible.builtin.template:
+    src: docker.list.j2
+    dest: /etc/apt/sources.list.d/docker.list
+    owner: root
+    group: root
+    mode: "0644"
+  register: dashboard_docker_repository
+
+- name: Refresh APT metadata for a changed Docker repository
+  ansible.builtin.apt:
+    update_cache: true
+  when: dashboard_docker_repository.changed
+
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name: "{{ dashboard_docker_packages }}"
+    state: present
+
+- name: Configure Docker log rotation
+  ansible.builtin.template:
+    src: docker-daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Docker
+
+- name: Enable and start Docker
+  ansible.builtin.service:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Give the workflow deployment user Docker access
+  ansible.builtin.user:
+    name: "{{ dashboard_deployment_user }}"
+    groups: docker
+    append: true
+    state: present
+
+- name: Keep the database access account present without interactive shell access
+  ansible.builtin.user:
+    name: "{{ dashboard_database_access_user }}"
+    create_home: true
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Inspect workflow environment files without reading them
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ dashboard_environment_files }}"
+  register: dashboard_environment_file_stats
+
+- name: Protect workflow environment files that already exist
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    owner: "{{ dashboard_deployment_user }}"
+    group: "{{ dashboard_deployment_user }}"
+    mode: "0600"
+  loop: "{{ dashboard_environment_file_stats.results }}"
+  when: item.stat.exists
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Report workflow environment files that still need provisioning
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item }} is absent. Add it out-of-band before running the matching
+      GitHub Actions deployment; this role never stores application secrets.
+  loop: "{{ dashboard_environment_file_stats.results }}"
+  when: not item.stat.exists
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Create the Certbot virtual environment
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -m
+      - venv
+      - "{{ dashboard_certbot_venv }}"
+    creates: "{{ dashboard_certbot_venv }}/bin/python"
+
+- name: Install Certbot and its nginx plugin in the virtual environment
+  ansible.builtin.pip:
+    name:
+      - "certbot=={{ dashboard_certbot_version }}"
+      - "certbot-nginx=={{ dashboard_certbot_version }}"
+    virtualenv: "{{ dashboard_certbot_venv }}"
+    state: present
+
+- name: Link the managed Certbot command into the system path
+  ansible.builtin.file:
+    src: "{{ dashboard_certbot_venv }}/bin/certbot"
+    dest: "{{ dashboard_certbot_command }}"
+    state: link
+    owner: root
+    group: root
+    force: true
+
+- name: Create the ACME web root
+  ansible.builtin.file:
+    path: /var/www/certbot
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Preserve or initialize the nginx abuse blocklist
+  ansible.builtin.file:
+    path: "{{ dashboard_nginx_blocklist_path }}"
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+    access_time: preserve
+    modification_time: preserve
+
+- name: Configure the nginx blocklist variable
+  ansible.builtin.template:
+    src: nginx-blocklist.conf.j2
+    dest: /etc/nginx/conf.d/dashboard-blocklist.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload nginx
+
+- name: Check for the shared Dashboard certificate
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ dashboard_certificate_name }}/fullchain.pem"
+  register: dashboard_certificate_before
+
+- name: Configure nginx for the current certificate state
+  ansible.builtin.template:
+    src: nginx-dashboard.conf.j2
+    dest: /etc/nginx/sites-available/dashboard.conf
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    dashboard_tls_available: "{{ dashboard_certificate_before.stat.exists }}"
+  notify: Reload nginx
+
+- name: Enable the Dashboard nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/dashboard.conf
+    dest: /etc/nginx/sites-enabled/dashboard.conf
+    state: link
+    force: true
+  notify: Reload nginx
+
+- name: Disable the distribution default nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload nginx
+
+- name: Apply the HTTP bootstrap configuration before certificate issuance
+  ansible.builtin.meta: flush_handlers
+
+- name: Request the shared Dashboard certificate
+  ansible.builtin.command:
+    argv:
+      - "{{ dashboard_certbot_command }}"
+      - certonly
+      - --nginx
+      - --non-interactive
+      - --agree-tos
+      - --no-eff-email
+      - --email
+      - "{{ dashboard_certificate_email }}"
+      - --cert-name
+      - "{{ dashboard_certificate_name }}"
+      - -d
+      - "{{ dashboard_certificate_domains | join(',') }}"
+    creates: "/etc/letsencrypt/live/{{ dashboard_certificate_name }}/fullchain.pem"
+  when:
+    - dashboard_request_certificate | bool
+    - not dashboard_certificate_before.stat.exists
+
+- name: Recheck the shared Dashboard certificate
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ dashboard_certificate_name }}/fullchain.pem"
+  register: dashboard_certificate_after
+
+- name: Require the certificate when issuance was requested
+  ansible.builtin.assert:
+    that: dashboard_certificate_after.stat.exists
+    fail_msg: >-
+      Certbot did not create the requested certificate. Verify that all domains
+      resolve to this host and that inbound TCP port 80 is reachable.
+  when: dashboard_request_certificate | bool
+
+- name: Configure nginx with TLS when the certificate is available
+  ansible.builtin.template:
+    src: nginx-dashboard.conf.j2
+    dest: /etc/nginx/sites-available/dashboard.conf
+    owner: root
+    group: root
+    mode: "0644"
+  vars:
+    dashboard_tls_available: "{{ dashboard_certificate_after.stat.exists }}"
+  notify: Reload nginx
+
+- name: Install the Certbot renewal service
+  ansible.builtin.template:
+    src: certbot-renew.service.j2
+    dest: /etc/systemd/system/certbot-renew.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: dashboard_certbot_service
+
+- name: Install the Certbot renewal timer
+  ansible.builtin.template:
+    src: certbot-renew.timer.j2
+    dest: /etc/systemd/system/certbot-renew.timer
+    owner: root
+    group: root
+    mode: "0644"
+  register: dashboard_certbot_timer
+
+- name: Enable and start certificate renewal
+  ansible.builtin.systemd:
+    name: certbot-renew.timer
+    daemon_reload: "{{ dashboard_certbot_service.changed or dashboard_certbot_timer.changed }}"
+    enabled: true
+    state: started
+
+- name: Check whether UFW is active
+  ansible.builtin.command: ufw status
+  register: dashboard_ufw_status
+  changed_when: false
+  when: dashboard_manage_firewall | bool
+
+- name: Set the default inbound firewall policy
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - default
+      - deny
+      - incoming
+  register: dashboard_ufw_default
+  changed_when: "'Default incoming policy changed' in dashboard_ufw_default.stdout"
+  when: dashboard_manage_firewall | bool
+
+- name: Allow required Dashboard host ports
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - allow
+      - "{{ item.port }}/{{ item.proto }}"
+  loop: "{{ dashboard_firewall_rules }}"
+  register: dashboard_ufw_allow
+  changed_when: >-
+    'Skipping adding existing rule' not in dashboard_ufw_allow.stdout
+  when: dashboard_manage_firewall | bool
+  loop_control:
+    label: "{{ item.port }}/{{ item.proto }}"
+
+- name: Enable UFW
+  ansible.builtin.command:
+    argv:
+      - ufw
+      - --force
+      - enable
+  when:
+    - dashboard_manage_firewall | bool
+    - "'Status: active' not in dashboard_ufw_status.stdout"
+
+- name: Check the installed node exporter version
+  ansible.builtin.command: /usr/local/bin/node_exporter --version
+  register: dashboard_node_exporter_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide whether node exporter needs installation
+  ansible.builtin.set_fact:
+    dashboard_node_exporter_install_required: >-
+      {{ ('version ' ~ dashboard_node_exporter_version)
+         not in (dashboard_node_exporter_installed.stdout
+                 ~ dashboard_node_exporter_installed.stderr) }}
+
+- name: Download node exporter
+  ansible.builtin.get_url:
+    url: >-
+      https://github.com/prometheus/node_exporter/releases/download/v{{ dashboard_node_exporter_version }}/node_exporter-{{ dashboard_node_exporter_version }}.{{ dashboard_node_exporter_arch }}.tar.gz
+    dest: "/var/cache/node_exporter-{{ dashboard_node_exporter_version }}.tar.gz"
+    checksum: "sha256:{{ dashboard_node_exporter_sha256 }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: dashboard_node_exporter_install_required | bool
+
+- name: Extract node exporter
+  ansible.builtin.unarchive:
+    src: "/var/cache/node_exporter-{{ dashboard_node_exporter_version }}.tar.gz"
+    dest: /opt
+    remote_src: true
+    creates: "/opt/node_exporter-{{ dashboard_node_exporter_version }}.{{ dashboard_node_exporter_arch }}/node_exporter"
+  when:
+    - dashboard_node_exporter_install_required | bool
+    - not ansible_check_mode
+
+- name: Install node exporter
+  ansible.builtin.copy:
+    src: "/opt/node_exporter-{{ dashboard_node_exporter_version }}.{{ dashboard_node_exporter_arch }}/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    owner: root
+    group: root
+    mode: "0755"
+    remote_src: true
+  notify: Restart node exporter
+  when:
+    - dashboard_node_exporter_install_required | bool
+    - not ansible_check_mode
+
+- name: Install the node exporter service
+  ansible.builtin.template:
+    src: node_exporter.service.j2
+    dest: /etc/systemd/system/node_exporter.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart node exporter
+
+- name: Enable and start node exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Create the Uptime Kuma data directory
+  ansible.builtin.file:
+    path: "{{ dashboard_uptime_kuma_data_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: dashboard_manage_uptime_kuma | bool
+
+- name: Install the Uptime Kuma Compose definition
+  ansible.builtin.template:
+    src: uptime-kuma-compose.yaml.j2
+    dest: "{{ dashboard_uptime_kuma_compose_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: dashboard_manage_uptime_kuma | bool
+
+- name: Reconcile Uptime Kuma
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - "{{ dashboard_uptime_kuma_compose_path }}"
+      - up
+      - -d
+  register: dashboard_uptime_kuma_up
+  changed_when: >-
+    'Created' in (dashboard_uptime_kuma_up.stdout + dashboard_uptime_kuma_up.stderr)
+    or 'Recreated' in (dashboard_uptime_kuma_up.stdout + dashboard_uptime_kuma_up.stderr)
+    or 'Started' in (dashboard_uptime_kuma_up.stdout + dashboard_uptime_kuma_up.stderr)
+    or 'Pulled' in (dashboard_uptime_kuma_up.stdout + dashboard_uptime_kuma_up.stderr)
+  when: dashboard_manage_uptime_kuma | bool

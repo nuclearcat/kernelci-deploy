@@ -1,0 +1,88 @@
+---
+dashboard_deployment_user: azureuser
+dashboard_database_access_user: nuvemsql
+
+dashboard_base_packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - nginx
+  - python3
+  - python3-venv
+  - ufw
+
+dashboard_docker_conflicting_packages:
+  - containerd
+  - docker-compose
+  - docker.io
+  - podman-docker
+  - runc
+
+dashboard_docker_packages:
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-ce
+  - docker-ce-cli
+  - docker-compose-plugin
+
+dashboard_docker_architectures:
+  x86_64: amd64
+  aarch64: arm64
+dashboard_docker_apt_key_url: https://download.docker.com/linux/debian/gpg
+dashboard_docker_apt_key_path: /etc/apt/keyrings/docker.asc
+dashboard_docker_log_max_size: 50m
+dashboard_docker_log_max_files: "3"
+
+dashboard_production_domains:
+  - dashboard.kernelci.org
+  - d.kernelci.org
+dashboard_staging_domain: staging.dashboard.kernelci.org
+dashboard_production_upstream_port: 8011
+dashboard_staging_upstream_port: 9000
+
+dashboard_certificate_name: staging.dashboard.kernelci.org
+dashboard_certificate_domains:
+  - staging.dashboard.kernelci.org
+  - dashboard.kernelci.org
+  - d.kernelci.org
+dashboard_certificate_email: bot@kernelci.org
+dashboard_request_certificate: false
+dashboard_certbot_version: 5.3.1
+dashboard_certbot_venv: /opt/certbot
+dashboard_certbot_command: /usr/local/bin/certbot
+
+# This file is updated out-of-band by the host's abuse-blocking tooling.  The
+# role creates it if missing but deliberately never replaces its contents.
+dashboard_nginx_blocklist_path: /etc/nginx/fake-macos-banned.geo
+
+dashboard_environment_files:
+  - /home/{{ dashboard_deployment_user }}/.env-production
+  - /home/{{ dashboard_deployment_user }}/.env-staging
+
+dashboard_manage_firewall: true
+# Existing rules not listed here are preserved.  These mirror the current host.
+dashboard_firewall_rules:
+  - port: "22"
+    proto: tcp
+  - port: "80"
+    proto: tcp
+  - port: "443"
+    proto: tcp
+  - port: "9000"
+    proto: tcp
+  - port: "2000"
+    proto: tcp
+  - port: "2002"
+    proto: tcp
+
+dashboard_node_exporter_version: 1.9.1
+dashboard_node_exporter_arch: linux-amd64
+dashboard_node_exporter_sha256: becb950ee80daa8ae7331d77966d94a611af79ad0d3307380907e0ec08f5b4e8
+dashboard_node_exporter_port: 2000
+
+dashboard_manage_uptime_kuma: true
+dashboard_uptime_kuma_image: louislam/uptime-kuma:1
+dashboard_uptime_kuma_compose_path: /srv/docker-compose.yaml
+dashboard_uptime_kuma_data_path: /srv/uptime-kuma
+dashboard_uptime_kuma_port: 3001

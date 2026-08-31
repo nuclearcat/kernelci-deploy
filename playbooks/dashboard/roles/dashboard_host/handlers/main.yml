@@ -1,0 +1,27 @@
+---
+- name: Restart Docker
+  ansible.builtin.service:
+    name: docker
+    state: restarted
+
+- name: Verify nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+  listen: Reload nginx
+
+- name: Reload nginx service
+  ansible.builtin.service:
+    name: nginx
+    state: reloaded
+  listen: Reload nginx
+
+- name: Reload systemd for node exporter
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: Restart node exporter
+
+- name: Restart node exporter service
+  ansible.builtin.service:
+    name: node_exporter
+    state: restarted
+  listen: Restart node exporter
