@@ -410,3 +410,118 @@
     or 'Started' in (dashboard_uptime_kuma_up.stdout + dashboard_uptime_kuma_up.stderr)
     or 'Pulled' in (dashboard_uptime_kuma_up.stdout + dashboard_uptime_kuma_up.stderr)
   when: dashboard_manage_uptime_kuma | bool
+
+- name: Install localhost-only Dashboard container monitoring
+  when: dashboard_manage_dozzle | bool
+  tags:
+    - dozzle
+  block:
+    - name: Create the Dashboard monitoring directory
+      ansible.builtin.file:
+        path: "{{ dashboard_monitoring_directory }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create the persistent Dozzle data directory
+      ansible.builtin.file:
+        path: "{{ dashboard_monitoring_directory }}/dozzle-data"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Install the Dashboard monitoring Compose definition
+      ansible.builtin.template:
+        src: dashboard-monitoring-compose.yaml.j2
+        dest: "{{ dashboard_monitoring_compose_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Validate the Dashboard monitoring Compose definition
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ dashboard_monitoring_compose_path }}"
+          - config
+          - --quiet
+      changed_when: false
+
+    - name: Install the Dashboard monitoring boot service
+      ansible.builtin.template:
+        src: dashboard-monitoring.service.j2
+        dest: "/etc/systemd/system/{{ dashboard_monitoring_service_name }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: dashboard_monitoring_systemd_unit
+
+    - name: Enable and start Dashboard monitoring at boot
+      ansible.builtin.systemd:
+        name: "{{ dashboard_monitoring_service_name }}"
+        daemon_reload: "{{ dashboard_monitoring_systemd_unit.changed }}"
+        enabled: true
+        state: started
+      when: not ansible_check_mode
+
+    - name: Reconcile Dashboard monitoring and wait for health checks
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ dashboard_monitoring_compose_path }}"
+          - up
+          - -d
+          - --remove-orphans
+          - --wait
+          - --wait-timeout
+          - "120"
+      register: dashboard_monitoring_up
+      changed_when: >-
+        'Created' in (dashboard_monitoring_up.stdout + dashboard_monitoring_up.stderr)
+        or 'Recreated' in (dashboard_monitoring_up.stdout + dashboard_monitoring_up.stderr)
+        or 'Started' in (dashboard_monitoring_up.stdout + dashboard_monitoring_up.stderr)
+        or 'Pulled' in (dashboard_monitoring_up.stdout + dashboard_monitoring_up.stderr)
+      when: not ansible_check_mode
+
+    - name: Wait for the localhost Dozzle health endpoint
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ dashboard_dozzle_port }}/healthcheck"
+        method: GET
+        status_code: 200
+        return_content: false
+      register: dashboard_dozzle_health
+      retries: 12
+      delay: 5
+      until: dashboard_dozzle_health.status == 200
+      when: not ansible_check_mode
+
+    - name: List running Dashboard monitoring services
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - -f
+          - "{{ dashboard_monitoring_compose_path }}"
+          - ps
+          - --services
+          - --status
+          - running
+      register: dashboard_monitoring_running_services
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Require both Dashboard monitoring services to be running
+      ansible.builtin.assert:
+        that:
+          - "'docker-socket-proxy' in dashboard_monitoring_running_services.stdout_lines"
+          - "'dozzle' in dashboard_monitoring_running_services.stdout_lines"
+        fail_msg: >-
+          Dozzle or its read-only Docker socket proxy is not running after
+          deployment.
+      when: not ansible_check_mode

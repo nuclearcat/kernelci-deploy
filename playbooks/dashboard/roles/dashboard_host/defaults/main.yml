@@ -86,3 +86,13 @@ dashboard_uptime_kuma_image: louislam/uptime-kuma:1
 dashboard_uptime_kuma_compose_path: /srv/docker-compose.yaml
 dashboard_uptime_kuma_data_path: /srv/uptime-kuma
 dashboard_uptime_kuma_port: 3001
+
+dashboard_manage_dozzle: true
+dashboard_monitoring_directory: /srv/dashboard-monitoring
+dashboard_monitoring_compose_path: /srv/dashboard-monitoring/docker-compose.yaml
+dashboard_monitoring_service_name: dashboard-monitoring.service
+dashboard_dozzle_port: 8080
+dashboard_dozzle_image: >-
+  amir20/dozzle:v10.8.0@sha256:243666b0593ff33ed1373901575236f0d6bed8a2d6b451cdae4345969a7b6d5c
+dashboard_docker_socket_proxy_image: >-
+  ghcr.io/tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459

@@ -18,6 +18,7 @@ Ansible owns:
 - UFW rules, without deleting unrelated existing rules;
 - node exporter on port 2000;
 - Uptime Kuma on `127.0.0.1:3001`; and
+- Dozzle on `127.0.0.1:8080` through a read-only Docker API proxy; and
 - permissions on existing workflow environment files.
 
 GitHub Actions continues to own the application deployments:
@@ -78,3 +79,32 @@ Before either application workflow runs, provision these files out-of-band as
 ```
 
 The playbook reports missing files but does not create empty substitutes.
+
+## Local container monitoring
+
+Dozzle is deliberately not exposed through nginx or a public firewall rule. It
+connects to Docker through an internal socket-proxy network where write methods
+and unrelated API sections are disabled. Both containers use pinned image
+digests, health checks, resource limits, and `restart: always`.
+
+An enabled `dashboard-monitoring.service` also runs `docker compose up --wait`
+after Docker starts, so the monitoring project is recreated and health-checked
+at boot even if its containers were removed previously.
+
+Forward both localhost services over the existing SSH access:
+
+```console
+ssh -N \
+  -L 8080:127.0.0.1:8080 \
+  -L 3001:127.0.0.1:3001 \
+  dashboard
+```
+
+Then open Dozzle at <http://127.0.0.1:8080> and Uptime Kuma at
+<http://127.0.0.1:3001>.
+
+To deploy only Dozzle without reconciling the rest of the host role:
+
+```console
+ansible-playbook main.yml --tags dozzle
+```
